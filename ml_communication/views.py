@@ -16,7 +16,7 @@ from django.http import HttpResponse
 def ml_webhook(request):
     notification_data = json.loads(request.body)
 
-    async_task('ml_communication.async_functions.identify_notification', notification_data, task_name=notification_data['_id'])
+    async_task('ml_communication.async_functions.process_notification', notification_data)
 
     return HttpResponse(status=200)
 

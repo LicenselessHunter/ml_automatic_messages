@@ -1,8 +1,7 @@
 from django.contrib import admin
-from .models import order_data_observation, message_data_observation, registered_order, ml_credentials
+from .models import registered_order, ml_credentials, api_error
 
 # Register your models here.
 admin.site.register(ml_credentials)
-admin.site.register(order_data_observation)
-admin.site.register(message_data_observation)
 admin.site.register(registered_order)
+admin.site.register(api_error)

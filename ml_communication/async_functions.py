@@ -1,11 +1,13 @@
 import json
 import requests
 from django.conf import settings
-from .models import order_data_observation, message_data_observation, registered_order, ml_credentials
+from django.utils import timezone
+from datetime import timedelta
+from django.utils.dateparse import parse_datetime
+from .models import registered_order, ml_credentials, api_error
 from django.db import transaction #module that provides a few ways to control how database transactions are managed.
 #Django’s default transaction behavior:
 #Django’s default behavior is to run in autocommit mode. Each query is immediately committed to the database, unless a transaction is active. Django uses transactions or savepoints automatically to guarantee the integrity of ORM operations that require multiple queries, especially delete() and update() queries.
-from django_q.models import OrmQ, Failure
 
 
 def ml_refresh_token(user_id):
@@ -24,6 +26,9 @@ def ml_refresh_token(user_id):
         #Esto va a evitar que múltiples workers concurrentes intenten actualizar las credenciales de mercado libre y se generen errores. Los workers bloqueado van a esperar en la línea anterior hasta que el worker elegido haya terminado.
 
         if not ml_creds.is_expired(): #Esto es para los workers bloqueados que estaban esperando. Van a confirmar que el access_token ya fue renovado y lo van a recoger. Para ellos, la función terminara aquí.
+            print('')
+            print('access_token ya fue restaurado')
+            print('')
             return ml_creds.access_token
 
 
@@ -43,18 +48,32 @@ def ml_refresh_token(user_id):
 
         if response.status_code == 200:
             token_data = response.json()
-            ml_creds.access_token = data['access_token']
-            ml_creds.refresh_token = data['refresh_token']
-            ml_creds.expires_at = timezone.now() + timedelta(seconds=data['expires_in']) #Se toma el tiempo actual y se usa timedelta para sumarle los 21600 segundos (o 6 horas) con la fecha resultante siendo la fecha en donde va a expirar el nuevo access_token.
+            ml_creds.access_token = token_data['access_token']
+            ml_creds.refresh_token = token_data['refresh_token']
+            ml_creds.expires_at = timezone.now() + timedelta(seconds=token_data['expires_in']) #Se toma el tiempo actual y se usa timedelta para sumarle los 21600 segundos (o 6 horas) con la fecha resultante siendo la fecha en donde va a expirar el nuevo access_token.
             ml_creds.save()
+            print('')
+            print('access_token restaurado :)')
+            print('')
 
             return ml_creds.access_token
 
+        else:
+            api_error.objects.create(
+                api_status_code = response.status_code,
+                api_response_text = response.text,
+                api_response_url = response.url
 
-def ml_access_token()
-    ml_creds = ml_credentials.objects.get()
+            )
+
+
+def ml_access_token():
+    ml_creds = ml_credentials.objects.get(user_id=settings.ML_SELLER_USER_ID)
 
     if ml_creds.is_expired():
+        print('')
+        print('access_token caducado :(')
+        print('')
         access_token = ml_refresh_token(ml_creds.user_id)
 
     else:
@@ -95,6 +114,17 @@ def get_order_data(order_id):
 
 
     response = requests.get(f'https://api.mercadolibre.com/orders/{order_id}', headers=headers)
+    return response
+
+
+def get_pack_data(order_id):
+    access_token = ml_access_token() #Se llama a la función para obtener y/o renovar el access_token de mercado libre
+
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+    }
+
+    response = requests.get(f'https://api.mercadolibre.com/packs/{order_id}', headers=headers)
     return response
 
 
@@ -153,177 +183,124 @@ def send_message_to_client(order_id, client_user_id, message_text):
     return response
 
 
-def delete_processing_tasks(order_id, notification_id):
-    processing_tasks_same_id = registered_order.objects.filter(order_id=order_id, status='processing')
 
-    if processing_tasks_same_id.exists():
-        
-        for task in processing_tasks_same_id:
-            Failure.objects.filter(name=notification_id).delete()
-            matching_ids = [
-                q.pk for q in OrmQ.objects.all() if q.name() == notification_id
-            ]
-            OrmQ.objects.filter(pk__in=matching_ids).delete()
+def handle_order(order_id, order_data, processing_order):
+    #response = get_order_data(order_id)
 
-        processing_tasks_same_id.delete()
+    #if response.status_code != 200:
+    #    return
 
-
-
-def handle_order(resource, notification_id):
-    '''
-    order_id = resource.split('/')[-1]
-    order_data_json = get_order_data(order_id)
-    order_data = json.loads(order_data_json.text)
-
-    shipping_id = order_data['shipping']['id']
+    #order_data = json.loads(response.text)
     
-    if shipping_id == None:
-        shipping_id = "No tiene"
+    #Por si es una orden normal
+    try:
+        shipping_id = order_data['shipping']['id']
 
-    order_data_observation.objects.create(order_id=order_id, shipping_id=shipping_id)
+    #Por si es un pack
+    except:
+        shipping_id = order_data['shipment']['id']
 
-    '''
+    order_status = order_data['status']
 
-    order_id = resource.split('/')[-1]
-
-
-    #---- DATA DE OBSERVACIÓN DE PRUEBA ----
-    order_data_json = get_order_data(order_id)
-    order_data = json.loads(order_data_json.text)
-
-    shipping_id = order_data['shipping']['id']
-    
-    if shipping_id == None:
-        shipping_id = "No tiene"
-
-    order_data_observation.objects.create(order_id=order_id, shipping_id=shipping_id)
-    
-
-    #---- Se eliminan tasks ya registrados en progreso ----
-    delete_processing_tasks(order_id, notification_id)
-
-    #Se crea el task en proceso para la orden actual
-    current_processing_task = registered_order.objects.create(order_id=order_id, status='processing', notification_id=notification_id)
-    
-
-    #---- Se verifica si ya hay un task completado para esta orden ----
-    processed_task_same_id = registered_order.objects.filter(order_id=order_id, status='processed')
-
-    if processed_task_same_id.exists():
-        print("")
-        print(f"(handle_order) La orden {order_id} ya fue registrada")
-        current_processing_task.delete()
-        return
-
-    
-
-    #---- Se verifica si la orden corresponde a un acuerdo de entrega y tiene status = paid. ----
-    order_data_json = get_order_data(order_id)
-    order_data = json.loads(order_data_json.text)
-
-    shipping_id = order_data['shipping']['id']
-    status = order_data['status']
-    
-    if shipping_id is not None or status != 'paid':
-        current_processing_task.delete()
+    #---- Se verifica si la orden corresponde a un acuerdo de entrega y tiene status = paid ----
+    if shipping_id is not None or (order_status != 'paid' and order_status != 'released'):
         return
 
 
     #---- Verificar los mensajes de la orden de venta ----
-    messages_json = get_pack_messages(order_id)
-    messages_data = json.loads(messages_json.text)
+    messages_response = get_pack_messages(order_id)
+    
+    if messages_response.status_code != 200:
+        api_error.objects.create(
+            api_status_code = messages_response.status_code,
+            api_response_text = messages_response.text,
+            api_response_url = messages_response.url
+        )
+        return
+
+    messages_data = json.loads(messages_response.text)
 
     if len(messages_data['messages']) > 0:
         
-        for message_data in messages_data['messages']:
+        for message in messages_data['messages']:
 
-            if message_data['from']['user_id'] == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
-                current_processing_task.status = 'processed'
-                current_processing_task.save()
+            if message['from']['user_id'] == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
+                processing_order.seller_message_sent = True
+                processing_order.save()
                 print("")
                 print(f"(handle_order) La orden {order_id} ya tiene un mensaje nuestro")
+                print("")
                 return
     
 
-    client_user_id = order_data['buyer']['id']
-    #send_message_to_client(order_id, client_user_id, "Hola, gracias por su compra. Por favor ne esitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.")
+    #---- Mandar mensaje al cliente ----
+    client_user_id = order_data['buyer']['id']  
+    send_message_to_client(order_id, client_user_id, "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.")
+
+    processing_order.seller_message_sent = True
+    processing_order.save()    
 
     print("")
-    print(f"(handle_order) Se envía mensaje para la orden {order_id} --> Hola, gracias por su compra. Por favor ne esitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.")
-
-    current_processing_task.status = 'processed'
-    current_processing_task.save()
-    
-    return
-
-def handle_message(message_id, notification_id):
-
-    message_data_json = get_message_data_by_id(message_id)
-    message_data = json.loads(message_data_json.text)
-    order_id = message_data['messages'][0]['message_resources'][0]['id']
+    print(f"(handle_order) Se envía mensaje para la orden {order_id} --> Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.")
+    print("")
 
 
-    #---- DATA DE PRUEBA ----
-    order_data_json = get_order_data(order_id)
-    order_data = json.loads(order_data_json.text)
+def handle_message(order_id, order_data, processing_order, message_sender):
 
-    shipping_id = order_data['shipping']['id']
-    
-    if shipping_id == None:
-        shipping_id = "No tiene"
+    #---- Verificar si el emisor del mensaje es un trabajador de Yep Chile o no ----
+    if message_sender == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
+        
+        processing_order.seller_message_sent = True
+        processing_order.save()
 
-    message_data_observation.objects.create(order_id=order_id, shipping_id=shipping_id, message_id=message_id)
-
-    #---- Verificar si el emisor del mensaje es un trabajador de Yep Chile o no
-    if message_data['messages'][0]['from']['user_id'] == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
         print("")
         print(f"(handle_message) La orden {order_id} ya tiene un mensaje nuestro")
-        return
-
-    #---- Se eliminan tasks ya registrados en progreso ----
-    delete_processing_tasks(order_id, notification_id)
-    
-    #Se crea el task en proceso para la orden actual
-    current_processing_task = registered_order.objects.create(order_id=order_id, status='processing', notification_id=notification_id)
-    
-
-    #---- Se verifica si ya hay un task completado para esta orden ----
-    processed_task_same_id = registered_order.objects.filter(order_id=order_id, status='processed')
-
-    if processed_task_same_id.exists():
         print("")
-        print(f"(handle_message) La orden {order_id} ya fue registrada")
-        current_processing_task.delete()
         return
 
+    #---- Verificar que la orden tenga status = paid ----
+    order_status = order_data['status']
 
-    #---- Se va a revisar el tipo logístico de la orden ----
-    order_data_json = get_order_data(order_id)
-    order_data = json.loads(order_data_json.text)
-
-    status = order_data['status']
-    
-    if status != 'paid':
-        current_processing_task.delete()
+    if order_status != 'paid' and order_status != 'released':
+        print("")
+        print(f"(handle_message) La orden {order_id} no tiene status paid o released")
+        print("")       
         return
-
 
     #---- Verificar los mensajes de la orden de venta ----
-    messages_json = get_pack_messages(order_id)
-    messages_data = json.loads(messages_json.text)
-        
-    for message_data in messages_data['messages']:
+    messages_response = get_pack_messages(order_id)
+    
+    if messages_response.status_code != 200:
+        api_error.objects.create(
+            api_status_code = messages_response.status_code,
+            api_response_text = messages_response.text,
+            api_response_url = messages_response.url
 
-        if message_data['from']['user_id'] == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
-            current_processing_task.status = 'processed'
-            current_processing_task.save()
+        )
+        return
+
+    messages_data = json.loads(messages_response.text)
+
+        
+    for message in messages_data['messages']:
+
+        if message['from']['user_id'] == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
+            processing_order.seller_message_sent = True
+            processing_order.save()
             print("")
             print(f"(handle_message) La orden {order_id} ya tiene un mensaje nuestro")
+            print("")
             return
 
 
     #---- Ver que tipo de mensaje requiere el cliente y mandarselo ----
-    shipping_id = order_data['shipping']['id']
+    #Por si es una orden normal
+    try:
+        shipping_id = order_data['shipping']['id']
+
+    #Por si es un pack
+    except:
+        shipping_id = order_data['shipment']['id']
 
     #Si la orden es "Acuerdo de entrega"
     if shipping_id is None:
@@ -333,28 +310,108 @@ def handle_message(message_id, notification_id):
     else:
         message_text = "Hola, estamos atentos a cualquier consulta. Si requiere repuestos, cambio o cualquier solución, por favor contáctenos a nuestro whatsapp disponible en la página web yeplatam para una asistencia personalizada."
 
-    #send_message_to_client(order_id, client_user_id, message_text)
-    
+    client_user_id = order_data['buyer']['id'] 
+    send_message_to_client(order_id, client_user_id, message_text)
+    processing_order.seller_message_sent = True
+    processing_order.save()
+
     print('')
     print(f"(handle_message) Se envía mensaje para la orden {order_id} --> {message_text}")
+    print('')
 
-    current_processing_task.status = 'processed'
-    current_processing_task.save()
 
-def identify_notification(notification_data):
-    #print(notification_data)
 
-    if notification_data['attempts'] > 1:
-        return
-    
+def process_notification(notification_data):
     topic = notification_data['topic']
     resource = notification_data['resource']
-    notification_id = notification_data['_id']
-
+    # Convertimos el string 'sent' de Meli a un objeto datetime
+    noti_dt = parse_datetime(notification_data['received'])
 
     if topic == 'orders_v2':
-        handle_order(resource, notification_id)
-
+        order_id = resource.split('/')[-1]
 
     elif topic == 'messages':
-        handle_message(resource, notification_id)
+        message_response = get_message_data_by_id(resource)
+
+        if message_response.status_code == 200:
+            message_data = json.loads(message_response.text)
+            order_id = message_data['messages'][0]['message_resources'][0]['id']
+            message_sender = message_data['messages'][0]['from']['user_id']
+
+        else:
+            api_error.objects.create(
+                api_status_code = message_response.status_code,
+                api_response_text = message_response.text,
+                api_response_url = message_response.url
+
+            )
+            return
+
+
+    with transaction.atomic():
+        #get_or_create() --> A convenience method for looking up an object with the given kwargs (may be empty if your model has defaults for all fields), creating one if necessary. Returns a tuple of (object, created), where object is the retrieved or created object and created is a boolean specifying whether a new object was created.
+        processing_order, new_order = registered_order.objects.select_for_update().get_or_create(
+            order_id=order_id,
+            defaults={"last_notification_at": noti_dt} #defaults parameter to specify field values that are only applied when a new object is created.
+        )
+
+        if not new_order:
+            if processing_order.seller_message_sent:
+                print("")
+                print(f"La orden {order_id} ya tiene un mensaje nuestro")
+                print("")
+                return
+
+            if noti_dt <= processing_order.last_notification_at:
+                print('')
+                print(f"Notificación de orden: {order_id} atrasada. Notificación rechazada")
+                print('')
+                return
+
+            processing_order.last_notification_at = noti_dt
+            processing_order.save()
+
+        #processing_order = registered_order.objects.get(order_id=order_id)
+
+
+        #---- Determinar si el order_id corresponde a un 'pack' o a una orden normal----
+        order_response = get_order_data(order_id)    
+    
+        if order_response.status_code == 200:
+            order_data = json.loads(order_response.text)
+            
+            #handle_order(order_id, processing_order)
+
+        elif order_response.status_code == 404:
+            pack_response = get_pack_data(order_id)
+
+            if pack_response.status_code != 200:
+                api_error.objects.create(
+                    api_status_code = pack_response.status_code,
+                    api_response_text = pack_response.text,
+                    api_response_url = pack_response.url
+
+                )   
+                return
+            print('')
+            print('Procesando pack')
+            print('')
+            order_data = json.loads(pack_response.text)
+
+        else:
+            api_error.objects.create(
+                api_status_code = order_response.status_code,
+                api_response_text = order_response.text,
+                api_response_url = order_response.url
+
+            )
+            return        
+        
+        
+        if topic == 'orders_v2':
+            handle_order(order_id, order_data, processing_order)
+
+
+        elif topic == 'messages':
+            handle_message(order_id, order_data, processing_order, message_sender)
+        

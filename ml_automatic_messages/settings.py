@@ -153,5 +153,7 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-ML_ACCESS_TOKEN = os.getenv('ML_ACCESS_TOKEN')
+#ML_ACCESS_TOKEN = os.getenv('ML_ACCESS_TOKEN')
 ML_SELLER_USER_ID = os.getenv('ML_SELLER_USER_ID')
+ML_CLIENT_ID = os.getenv('ML_CLIENT_ID')
+ML_CLIENT_SECRET = os.getenv('ML_CLIENT_SECRET')

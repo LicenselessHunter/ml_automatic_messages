@@ -6,9 +6,9 @@ from datetime import timedelta
 
 class ml_credentials(models.Model):
     user_id = models.CharField(max_length=50, unique=True)
-    access_token = models.TextField()
+    access_token = models.TextField(null=True, blank=True)
     refresh_token = models.TextField()
-    expires_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def is_expired(self):
@@ -17,34 +17,18 @@ class ml_credentials(models.Model):
         return timezone.now() >= (self.expires_at - timedelta(minutes=5))
         #Ej: expires_at = 2026-04-15 01:52:47.079295 --> expires_at - timedelta(minutes=5) = 2026-04-15 01:47:47.079295 (5 minutos menos)
 
-
-
-class order_data_observation(models.Model):
-    order_id = models.CharField(max_length=100)
-    shipping_id = models.CharField(max_length=100)
-    notification_recieved_time = models.DateTimeField(default=timezone.now)
-
-    def __str__(self):   #Esta función va a definir como se van a ver los productos de la base de datos en la sección de admin y en el shell.
-        return f"{self.order_id} - Shipping id: {self.shipping_id} - {self.notification_recieved_time})"
-
-class message_data_observation(models.Model):
-    order_id = models.CharField(max_length=100)
-    message_id = models.CharField(max_length=100)
-    notification_recieved_time = models.DateTimeField(default=timezone.now)
-    shipping_id = models.CharField(max_length=100)
-
-    def __str__(self):   #Esta función va a definir como se van a ver los productos de la base de datos en la sección de admin y en el shell.
-        return f"{self.order_id} - Shipping id: {self.shipping_id} - {self.notification_recieved_time})"
-
 class registered_order(models.Model):
-    PROCESS_STATUS = [
-        ('processing', 'processing'),
-        ('processed', 'processed'),
-    ]
-
-    order_id = models.CharField(max_length=100)
-    status = models.CharField(max_length=20, choices=PROCESS_STATUS)
-    notification_id = models.CharField(max_length=100)
+    order_id = models.CharField(max_length=50, unique=True)
+    seller_message_sent = models.BooleanField(default=False)
+    last_notification_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):   #Esta función va a definir como se van a ver los productos de la base de datos en la sección de admin y en el shell.
-            return f"{self.order_id} - STATUS: {self.status} - {self.notification_id})"
+            return f"{self.order_id} - MESSAGE_SENT: {self.seller_message_sent}"
+
+
+class api_error(models.Model):
+    api_status_code = models.IntegerField()
+    api_response_text = models.TextField()
+    api_response_url = models.TextField()
+    created_at = models.DateTimeField(auto_now=True)

@@ -9,7 +9,7 @@ class ml_credentials(models.Model):
     access_token = models.TextField(null=True, blank=True)
     refresh_token = models.TextField()
     expires_at = models.DateTimeField(null=True, blank=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    updated_at = models.DateTimeField(auto_now=True) #auto_now --> automatically update the field to the current date and time every time the object is saved.
 
     def is_expired(self):
         # Usamos un margen de 5 minutos para evitar que expire durante la ejecución. 
@@ -19,16 +19,14 @@ class ml_credentials(models.Model):
 
 class registered_order(models.Model):
     order_id = models.CharField(max_length=50, unique=True)
-    seller_message_sent = models.BooleanField(default=False)
-    last_notification_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True) #auto_now_add --> automatically set the field to the current date and time when the model instance is first created.
 
     def __str__(self):   #Esta función va a definir como se van a ver los productos de la base de datos en la sección de admin y en el shell.
-            return f"{self.order_id} - MESSAGE_SENT: {self.seller_message_sent}"
+            return f"{self.order_id}"
 
 
 class api_error(models.Model):
     api_status_code = models.IntegerField()
     api_response_text = models.TextField()
     api_response_url = models.TextField()
-    created_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True) #auto_now_add --> automatically set the field to the current date and time when the model instance is first created.

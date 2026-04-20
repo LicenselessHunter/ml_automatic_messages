@@ -204,6 +204,11 @@ def handle_order(order_id, order_data, processing_order):
 
     #---- Se verifica si la orden corresponde a un acuerdo de entrega y tiene status = paid ----
     if shipping_id is not None or (order_status != 'paid' and order_status != 'released'):
+        print('')
+        print(f'(handle_order) La orden {order_id} no tiene status pagado y/o no es acuerdo de entrega')
+        print('')
+        
+        processing_order.delete()
         return
 
 
@@ -211,6 +216,8 @@ def handle_order(order_id, order_data, processing_order):
     messages_response = get_pack_messages(order_id)
     
     if messages_response.status_code != 200:
+        processing_order.delete()
+
         api_error.objects.create(
             api_status_code = messages_response.status_code,
             api_response_text = messages_response.text,
@@ -225,8 +232,6 @@ def handle_order(order_id, order_data, processing_order):
         for message in messages_data['messages']:
 
             if message['from']['user_id'] == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
-                processing_order.seller_message_sent = True
-                processing_order.save()
                 print("")
                 print(f"(handle_order) La orden {order_id} ya tiene un mensaje nuestro")
                 print("")
@@ -235,13 +240,10 @@ def handle_order(order_id, order_data, processing_order):
 
     #---- Mandar mensaje al cliente ----
     client_user_id = order_data['buyer']['id']  
-    send_message_to_client(order_id, client_user_id, "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.")
-
-    processing_order.seller_message_sent = True
-    processing_order.save()    
+    send_message_to_client(order_id, client_user_id, "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto.")   
 
     print("")
-    print(f"(handle_order) Se envía mensaje para la orden {order_id} --> Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.")
+    print(f"(handle_order) Se envía mensaje para la orden {order_id} --> Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto.")
     print("")
 
 
@@ -249,9 +251,6 @@ def handle_message(order_id, order_data, processing_order, message_sender):
 
     #---- Verificar si el emisor del mensaje es un trabajador de Yep Chile o no ----
     if message_sender == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
-        
-        processing_order.seller_message_sent = True
-        processing_order.save()
 
         print("")
         print(f"(handle_message) La orden {order_id} ya tiene un mensaje nuestro")
@@ -264,7 +263,9 @@ def handle_message(order_id, order_data, processing_order, message_sender):
     if order_status != 'paid' and order_status != 'released':
         print("")
         print(f"(handle_message) La orden {order_id} no tiene status paid o released")
-        print("")       
+        print("")
+
+        processing_order.delete()  
         return
 
     #---- Verificar los mensajes de la orden de venta ----
@@ -285,8 +286,6 @@ def handle_message(order_id, order_data, processing_order, message_sender):
     for message in messages_data['messages']:
 
         if message['from']['user_id'] == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
-            processing_order.seller_message_sent = True
-            processing_order.save()
             print("")
             print(f"(handle_message) La orden {order_id} ya tiene un mensaje nuestro")
             print("")
@@ -304,16 +303,14 @@ def handle_message(order_id, order_data, processing_order, message_sender):
 
     #Si la orden es "Acuerdo de entrega"
     if shipping_id is None:
-        message_text = "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento."
+        message_text = "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto."
 
     #Si la orden es de cualquier otro tipo logístico
     else:
-        message_text = "Hola, estamos atentos a cualquier consulta. Si requiere repuestos, cambio o cualquier solución, por favor contáctenos a nuestro whatsapp disponible en la página web yeplatam para una asistencia personalizada."
+        message_text = "Hola, estamos atentos a cualquier consulta. Si requiere repuestos, cambio o cualquier solución, por favor contáctenos a nuestro whatsapp disponible en la página web yeplatam para una asistencia personalizada.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto."
 
     client_user_id = order_data['buyer']['id'] 
     send_message_to_client(order_id, client_user_id, message_text)
-    processing_order.seller_message_sent = True
-    processing_order.save()
 
     print('')
     print(f"(handle_message) Se envía mensaje para la orden {order_id} --> {message_text}")
@@ -324,8 +321,6 @@ def handle_message(order_id, order_data, processing_order, message_sender):
 def process_notification(notification_data):
     topic = notification_data['topic']
     resource = notification_data['resource']
-    # Convertimos el string 'sent' de Meli a un objeto datetime
-    noti_dt = parse_datetime(notification_data['received'])
 
     if topic == 'orders_v2':
         order_id = resource.split('/')[-1]
@@ -351,27 +346,16 @@ def process_notification(notification_data):
     with transaction.atomic():
         #get_or_create() --> A convenience method for looking up an object with the given kwargs (may be empty if your model has defaults for all fields), creating one if necessary. Returns a tuple of (object, created), where object is the retrieved or created object and created is a boolean specifying whether a new object was created.
         processing_order, new_order = registered_order.objects.select_for_update().get_or_create(
-            order_id=order_id,
-            defaults={"last_notification_at": noti_dt} #defaults parameter to specify field values that are only applied when a new object is created.
+            order_id=order_id
         )
 
         if not new_order:
-            if processing_order.seller_message_sent:
-                print("")
-                print(f"La orden {order_id} ya tiene un mensaje nuestro")
-                print("")
-                return
 
-            if noti_dt <= processing_order.last_notification_at:
-                print('')
-                print(f"Notificación de orden: {order_id} atrasada. Notificación rechazada")
-                print('')
-                return
+            print("")
+            print(f"La orden {order_id} ya está registrada, por lo que ya tiene un mensaje nuestro")
+            print("")
 
-            processing_order.last_notification_at = noti_dt
-            processing_order.save()
-
-        #processing_order = registered_order.objects.get(order_id=order_id)
+            return
 
 
         #---- Determinar si el order_id corresponde a un 'pack' o a una orden normal----
@@ -380,12 +364,12 @@ def process_notification(notification_data):
         if order_response.status_code == 200:
             order_data = json.loads(order_response.text)
             
-            #handle_order(order_id, processing_order)
 
         elif order_response.status_code == 404:
             pack_response = get_pack_data(order_id)
 
             if pack_response.status_code != 200:
+                processing_order.delete()
                 api_error.objects.create(
                     api_status_code = pack_response.status_code,
                     api_response_text = pack_response.text,
@@ -393,12 +377,14 @@ def process_notification(notification_data):
 
                 )   
                 return
+                
             print('')
             print('Procesando pack')
             print('')
             order_data = json.loads(pack_response.text)
 
         else:
+            processing_order.delete()
             api_error.objects.create(
                 api_status_code = order_response.status_code,
                 api_response_text = order_response.text,

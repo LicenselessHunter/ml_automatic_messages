@@ -27,7 +27,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG')
+DEBUG = True
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(' ')
 
@@ -55,8 +55,8 @@ INSTALLED_APPS = [
 Q_CLUSTER = {
     'name': 'AsyncBroker', #Used to differentiate between projects using the same broker. On most broker types this will be used as the queue name. Defaults to 'default'.
     'workers': 8, #The number of workers to use in the cluster. Defaults to CPU count of the current host, but can be set to a custom number.
-    'timeout': 40, #The number of seconds a worker is allowed to spend on a task before it’s terminated. Defaults to None, meaning it will never time out. Set this to something that makes sense for your project. Can be overridden for individual tasks.
-    'retry': 60, #The number of seconds a broker will wait for a cluster to finish a task, before it’s presented again. Only works with brokers that support delivery receipts. Defaults to 60.
+    'timeout': 20, #The number of seconds a worker is allowed to spend on a task before it’s terminated. Defaults to None, meaning it will never time out. Set this to something that makes sense for your project. Can be overridden for individual tasks.
+    'retry': 30, #The number of seconds a broker will wait for a cluster to finish a task, before it’s presented again. Only works with brokers that support delivery receipts. Defaults to 60.
     #The value must be bigger than the time it takes to complete longest task, i.e. timeout must be less than retry value and all tasks must complete in less time than the selected retry time. If this does not hold, i.e. the retry value is less than timeout or less than it takes to finish a task, Django-Q2 will start the task again if the used broker supports receipts.
     'queue_limit': 50, #This does not limit the amount of tasks that can be queued on the broker, but rather how many tasks are kept in memory by a single cluster. Setting this to a reasonable number, can help balance the workload and the memory overhead of each individual cluster. Defaults to workers**2.
     'orm': 'default' # Use Django's ORM + database for broker. The broker sits between your Django instances and your Django Q2 cluster instances; accepting, saving and delivering task packages. Currently we support a variety of brokers. Is more or less like a post office box: it takes messages, holds them in a queue, and folks from around the city can retrieve these messages later.
@@ -153,7 +153,10 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-#ML_ACCESS_TOKEN = os.getenv('ML_ACCESS_TOKEN')
 ML_SELLER_USER_ID = os.getenv('ML_SELLER_USER_ID')
 ML_CLIENT_ID = os.getenv('ML_CLIENT_ID')
 ML_CLIENT_SECRET = os.getenv('ML_CLIENT_SECRET')
+
+SALT_KEY = os.getenv('SALT_KEY') #Este es un key que se usa para encriptar y decodificar los tokens de mercado libre. Esto se hace mediante el paquete Django Fernet Encrypted Fields (https://github.com/jazzband/django-fernet-encrypted-fields)
+
+ADMIN_URL = os.getenv('ADMIN_URL')

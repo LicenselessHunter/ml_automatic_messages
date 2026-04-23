@@ -13,12 +13,13 @@ from django.http import HttpResponse
 # Create your views here.
 @csrf_exempt 
 @require_POST #Decorator to require that a view only accepts the POST method.
-def ml_webhook(request):
+def ml_webhook(request): #Este view recibe las notificaciones de mercado libre, para luego ser procesados asincrónicamente.
+
     notification_data = json.loads(request.body)
 
-    async_task('ml_communication.async_functions.process_notification', notification_data)
+    async_task('ml_communication.async_functions.process_notification', notification_data) #Aquí se van a procesar las notificaciones de manera asincrónica y paralela.
 
-    return HttpResponse(status=200)
+    return HttpResponse(status=200) #Se debe responder rapidamente a mercado libre con una respuesta '200' (En menos de 0.5 segundos) o mercado libre va a desactivar las notificaciones por 'fallback'
 
 # ML no envía CSRF token. Sin @csrf_exempt, Django rechazaría todos los webhooks de ML con un 403 Forbidden porque no incluyen el token 
 

@@ -144,7 +144,7 @@ def get_pack_messages(order_id):
 
     #https://api.mercadolibre.com/messages/packs/$PACK_ID/sellers/$USER_ID?tag=post_sale.
     #En lugar del $PACK_ID se puede usar el id de la orden.
-    response = requests.get(f'https://api.mercadolibre.com/messages/packs/{order_id}/sellers/{settings.ML_SELLER_USER_ID}?limit=15', params=params, headers=headers)
+    response = requests.get(f'https://api.mercadolibre.com/messages/packs/{order_id}/sellers/{settings.ML_SELLER_USER_ID}?limit=100', params=params, headers=headers)
 
     return response
 
@@ -185,12 +185,6 @@ def send_message_to_client(order_id, client_user_id, message_text):
 
 
 def handle_order(order_id, order_data, processing_order):
-    #response = get_order_data(order_id)
-
-    #if response.status_code != 200:
-    #    return
-
-    #order_data = json.loads(response.text)
     
     #Por si es una orden normal
     try:
@@ -202,7 +196,7 @@ def handle_order(order_id, order_data, processing_order):
 
     order_status = order_data['status']
 
-    #---- Se verifica si la orden corresponde a un acuerdo de entrega y tiene status = paid ----
+    #---- Se verifica si la orden corresponde a un acuerdo de entrega y tiene status = paid (orden normal) o status = released (orden pack) ----
     if shipping_id is not None or (order_status != 'paid' and order_status != 'released'):
         print('')
         print(f'(handle_order) La orden {order_id} no tiene status pagado y/o no es acuerdo de entrega')
@@ -240,10 +234,10 @@ def handle_order(order_id, order_data, processing_order):
 
     #---- Mandar mensaje al cliente ----
     client_user_id = order_data['buyer']['id']  
-    send_message_to_client(order_id, client_user_id, "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto.")   
+    send_message_to_client(order_id, client_user_id, "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto*")   
 
     print("")
-    print(f"(handle_order) Se envía mensaje para la orden {order_id} --> Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto.")
+    print(f"(handle_order) Se envía mensaje para la orden {order_id} --> Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto*")
     print("")
 
 
@@ -257,7 +251,7 @@ def handle_message(order_id, order_data, processing_order, message_sender):
         print("")
         return
 
-    #---- Verificar que la orden tenga status = paid ----
+    #---- Verificar que la orden tenga status = paid (orden normal) o status = released (orden pack) ----
     order_status = order_data['status']
 
     if order_status != 'paid' and order_status != 'released':
@@ -303,11 +297,11 @@ def handle_message(order_id, order_data, processing_order, message_sender):
 
     #Si la orden es "Acuerdo de entrega"
     if shipping_id is None:
-        message_text = "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto."
+        message_text = "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto*"
 
     #Si la orden es de cualquier otro tipo logístico
     else:
-        message_text = "Hola, estamos atentos a cualquier consulta. Si requiere repuestos, cambio o cualquier solución, por favor contáctenos a nuestro whatsapp disponible en la página web yeplatam para una asistencia personalizada.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto."
+        message_text = "Hola, estamos atentos a cualquier consulta. Si requiere repuestos, cambio o cualquier solución, por favor contáctenos a nuestro whatsapp disponible en la página web yeplatam para una asistencia personalizada.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto*"
 
     client_user_id = order_data['buyer']['id'] 
     send_message_to_client(order_id, client_user_id, message_text)
@@ -343,7 +337,12 @@ def process_notification(notification_data):
             return
 
 
+    #atomic() Atomicity is the defining property of database transactions. atomic allows us to create a block of code within which the atomicity on the database is guaranteed. If the block of code is successfully completed, the changes are committed to the database. If there is an exception, the changes are rolled back. 
+    #En este caso, el bloque sería todo lo que encierra 'transaction.atomic()', en lugar de hacer un autocommit a los queries de inmediato (Como lo hace django tradicionalmente), esta atomicidad va a asegurar que los cambios a la base de datos se completen si el bloque de código se completa con exito.
+
     with transaction.atomic():
+        #Los workers bloqueados esperaran aquí hasta que el worker termine de procesar la orden.
+        
         #get_or_create() --> A convenience method for looking up an object with the given kwargs (may be empty if your model has defaults for all fields), creating one if necessary. Returns a tuple of (object, created), where object is the retrieved or created object and created is a boolean specifying whether a new object was created.
         processing_order, new_order = registered_order.objects.select_for_update().get_or_create(
             order_id=order_id

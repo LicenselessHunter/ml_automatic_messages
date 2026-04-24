@@ -7,7 +7,9 @@ Django==6.0.3
 django-fernet-encrypted-fields==0.4.0
 django-picklefield==3.4.0
 django-q2==1.9.0
+gunicorn==25.3.0
 idna==3.11
+packaging==26.1
 psycopg2==2.9.11
 pycparser==3.0
 python-dotenv==1.2.2

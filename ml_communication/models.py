@@ -30,7 +30,7 @@ class ml_messages(models.Model):
     ]
 
     message_type = models.CharField(max_length=30, choices=MESSAGE_TYPE)
-    message_text = models.CharField(max_length=350)
+    message_text = models.TextField(max_length=350)
 
 class registered_order(models.Model):
     order_id = models.CharField(max_length=50, unique=True)

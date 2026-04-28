@@ -235,8 +235,8 @@ def handle_order(order_id, order_data, processing_order):
     #---- Mandar mensaje al cliente ----
     client_user_id = order_data['buyer']['id']
 
-    message_obj = ml_messages.objects.filter(message_type='delivery_arrangement')
-    send_message_to_client(order_id, client_user_id, message_obj.message_text)   
+    message_obj = ml_messages.objects.get(message_type='delivery_arrangement')
+    send_message_to_client(order_id, client_user_id, message_obj.message_text)
 
     print("")
     print(f"(handle_order) Se envía mensaje para la orden {order_id} --> {message_obj.message_text}")
@@ -299,11 +299,11 @@ def handle_message(order_id, order_data, processing_order, message_sender):
 
     #Si la orden es "Acuerdo de entrega"
     if shipping_id is None:
-        message_obj = ml_messages.objects.filter(message_type='delivery_arrangement')
+        message_obj = ml_messages.objects.get(message_type='delivery_arrangement')
 
     #Si la orden es de cualquier otro tipo logístico
     else:
-        message_obj = ml_messages.objects.filter(message_type='customer_inquiries')
+        message_obj = ml_messages.objects.get(message_type='customer_inquiries')
 
     client_user_id = order_data['buyer']['id'] 
     send_message_to_client(order_id, client_user_id, message_obj.message_text)

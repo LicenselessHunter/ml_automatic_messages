@@ -4,7 +4,7 @@ from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
 from django.utils.dateparse import parse_datetime
-from .models import registered_order, ml_credentials, api_error
+from .models import registered_order, ml_credentials, api_error, ml_messages
 from django.db import transaction #module that provides a few ways to control how database transactions are managed.
 #Django’s default transaction behavior:
 #Django’s default behavior is to run in autocommit mode. Each query is immediately committed to the database, unless a transaction is active. Django uses transactions or savepoints automatically to guarantee the integrity of ORM operations that require multiple queries, especially delete() and update() queries.
@@ -233,11 +233,13 @@ def handle_order(order_id, order_data, processing_order):
     
 
     #---- Mandar mensaje al cliente ----
-    client_user_id = order_data['buyer']['id']  
-    send_message_to_client(order_id, client_user_id, "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto*")   
+    client_user_id = order_data['buyer']['id']
+
+    message_obj = ml_messages.objects.filter(message_type='delivery_arrangement')
+    send_message_to_client(order_id, client_user_id, message_obj.message_text)   
 
     print("")
-    print(f"(handle_order) Se envía mensaje para la orden {order_id} --> Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto*")
+    print(f"(handle_order) Se envía mensaje para la orden {order_id} --> {message_obj.message_text}")
     print("")
 
 
@@ -297,17 +299,17 @@ def handle_message(order_id, order_data, processing_order, message_sender):
 
     #Si la orden es "Acuerdo de entrega"
     if shipping_id is None:
-        message_text = "Hola, gracias por su compra. Por favor necesitamos su teléfono y dirección para gestionar la entrega. El envío es gratis para usted y una vez realizado le adjuntaremos su código de seguimiento.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto*"
+        message_obj = ml_messages.objects.filter(message_type='delivery_arrangement')
 
     #Si la orden es de cualquier otro tipo logístico
     else:
-        message_text = "Hola, estamos atentos a cualquier consulta. Si requiere repuestos, cambio o cualquier solución, por favor contáctenos a nuestro whatsapp disponible en la página web yeplatam para una asistencia personalizada.\n\nHorario de atención: lunes a viernes 09:00 AM - 17:00 PM\n\n*Este es un mensaje automático, un asociado de YEP le atenderá pronto*"
+        message_obj = ml_messages.objects.filter(message_type='customer_inquiries')
 
     client_user_id = order_data['buyer']['id'] 
-    send_message_to_client(order_id, client_user_id, message_text)
+    send_message_to_client(order_id, client_user_id, message_obj.message_text)
 
     print('')
-    print(f"(handle_message) Se envía mensaje para la orden {order_id} --> {message_text}")
+    print(f"(handle_message) Se envía mensaje para la orden {order_id} --> {message_obj.message_text}")
     print('')
 
 

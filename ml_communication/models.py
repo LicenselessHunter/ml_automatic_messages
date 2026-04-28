@@ -23,6 +23,15 @@ class ml_credentials(models.Model):
         return timezone.now() >= (self.expires_at - timedelta(minutes=5))
         #Ej: expires_at = 2026-04-15 01:52:47.079295 --> expires_at - timedelta(minutes=5) = 2026-04-15 01:47:47.079295 (5 minutos menos)
 
+class ml_messages(models.Model):
+    MESSAGE_TYPE = [
+        ('delivery_arrangement', 'delivery_arrangement'),
+        ('customer_inquiries', 'customer_inquiries'),
+    ]
+
+    message_type = models.CharField(max_length=30, choices=MESSAGE_TYPE)
+    message_text = models.CharField(max_length=350)
+
 class registered_order(models.Model):
     order_id = models.CharField(max_length=50, unique=True)
     created_at = models.DateTimeField(auto_now_add=True) #auto_now_add --> automatically set the field to the current date and time when the model instance is first created.

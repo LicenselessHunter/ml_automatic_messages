@@ -3,11 +3,18 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
-from django.utils.dateparse import parse_datetime
 from .models import registered_order, ml_credentials, api_error, ml_messages
 from django.db import transaction #module that provides a few ways to control how database transactions are managed.
 #Django’s default transaction behavior:
 #Django’s default behavior is to run in autocommit mode. Each query is immediately committed to the database, unless a transaction is active. Django uses transactions or savepoints automatically to guarantee the integrity of ORM operations that require multiple queries, especially delete() and update() queries.
+
+
+def create_api_error(response):
+    api_error.objects.create(
+        api_status_code=response.status_code,
+        api_response_text=response.text,
+        api_response_url=response.url,
+    )
 
 
 def ml_refresh_token(user_id):
@@ -59,12 +66,7 @@ def ml_refresh_token(user_id):
             return ml_creds.access_token
 
         else:
-            api_error.objects.create(
-                api_status_code = response.status_code,
-                api_response_text = response.text,
-                api_response_url = response.url
-
-            )
+            create_api_error(response)
 
 
 def ml_access_token():
@@ -98,6 +100,20 @@ def get_message_data_by_id(message_id):
     response = requests.get(f'https://api.mercadolibre.com/messages/{message_id}', params=params, headers=headers)
 
     return response
+
+
+def get_shipping_data(shipping_id):
+    access_token = ml_access_token() #Se llama a la función para obtener y/o renovar el access_token de mercado libre
+
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'x-format-new': 'true',
+    }
+
+    response = requests.get(f'https://api.mercadolibre.com/shipments/{shipping_id}', headers=headers)
+
+    return response  
+
 
 def get_order_data(order_id):
     #---- BUSCAR ÓRDENES ----
@@ -197,13 +213,32 @@ def handle_order(order_id, order_data, processing_order):
     order_status = order_data['status']
 
     #---- Se verifica si la orden corresponde a un acuerdo de entrega y tiene status = paid (orden normal) o status = released (orden pack) ----
-    if shipping_id is not None or (order_status != 'paid' and order_status != 'released'):
+    if order_status != 'paid' and order_status != 'released':
         print('')
-        print(f'(handle_order) La orden {order_id} no tiene status pagado y/o no es acuerdo de entrega')
+        print(f'(handle_order) La orden {order_id} no tiene status pagado')
         print('')
         
         processing_order.delete()
         return
+
+    if shipping_id is not None:
+
+        shipping_response = get_shipping_data(shipping_id)
+        
+        if shipping_response.status_code != 200:
+            processing_order.delete()
+            create_api_error(shipping_response)
+            return
+
+        shipping_data = json.loads(shipping_response.text)
+
+        if shipping_data['logistic']['mode'] != 'custom':
+            print('')
+            print(f'(handle_order) La orden {order_id} no es acuerdo de entrega')
+            print('')
+            
+            processing_order.delete()
+            return            
 
 
     #---- Verificar los mensajes de la orden de venta ----
@@ -211,12 +246,7 @@ def handle_order(order_id, order_data, processing_order):
     
     if messages_response.status_code != 200:
         processing_order.delete()
-
-        api_error.objects.create(
-            api_status_code = messages_response.status_code,
-            api_response_text = messages_response.text,
-            api_response_url = messages_response.url
-        )
+        create_api_error(messages_response)
         return
 
     messages_data = json.loads(messages_response.text)
@@ -268,17 +298,12 @@ def handle_message(order_id, order_data, processing_order, message_sender):
     messages_response = get_pack_messages(order_id)
     
     if messages_response.status_code != 200:
-        api_error.objects.create(
-            api_status_code = messages_response.status_code,
-            api_response_text = messages_response.text,
-            api_response_url = messages_response.url
-
-        )
+        create_api_error(messages_response)
         return
 
     messages_data = json.loads(messages_response.text)
 
-        
+
     for message in messages_data['messages']:
 
         if message['from']['user_id'] == int(settings.ML_SELLER_USER_ID): #Si el mensaje es del vendedor.
@@ -297,13 +322,29 @@ def handle_message(order_id, order_data, processing_order, message_sender):
     except:
         shipping_id = order_data['shipment']['id']
 
-    #Si la orden es "Acuerdo de entrega"
+    #Si la orden no tiene shipping id, ya se concluye que es "Acuerdo de entrega"
     if shipping_id is None:
         message_obj = ml_messages.objects.get(message_type='delivery_arrangement')
 
-    #Si la orden es de cualquier otro tipo logístico
+    #Si la orden tiene shipping id, se evalua a que tipo logístico pertenece
     else:
-        message_obj = ml_messages.objects.get(message_type='customer_inquiries')
+        
+        shipping_response = get_shipping_data(shipping_id)
+        
+        if shipping_response.status_code != 200:
+            processing_order.delete()
+            create_api_error(shipping_response)
+            return
+
+        shipping_data = json.loads(shipping_response.text)
+
+        #Es un acuerdo de entrega con shipping_id
+        if shipping_data['logistic']['mode'] == 'custom':
+            message_obj = ml_messages.objects.get(message_type='delivery_arrangement')
+
+        #Es una orden de cualquier otro tipo logístico
+        else:
+            message_obj = ml_messages.objects.get(message_type='customer_inquiries')
 
     client_user_id = order_data['buyer']['id'] 
     send_message_to_client(order_id, client_user_id, message_obj.message_text)
@@ -330,12 +371,7 @@ def process_notification(notification_data):
             message_sender = message_data['messages'][0]['from']['user_id']
 
         else:
-            api_error.objects.create(
-                api_status_code = message_response.status_code,
-                api_response_text = message_response.text,
-                api_response_url = message_response.url
-
-            )
+            create_api_error(message_response)
             return
 
 
@@ -371,12 +407,7 @@ def process_notification(notification_data):
 
             if pack_response.status_code != 200:
                 processing_order.delete()
-                api_error.objects.create(
-                    api_status_code = pack_response.status_code,
-                    api_response_text = pack_response.text,
-                    api_response_url = pack_response.url
-
-                )   
+                create_api_error(pack_response)
                 return
                 
             print('')
@@ -386,12 +417,7 @@ def process_notification(notification_data):
 
         else:
             processing_order.delete()
-            api_error.objects.create(
-                api_status_code = order_response.status_code,
-                api_response_text = order_response.text,
-                api_response_url = order_response.url
-
-            )
+            create_api_error(order_response)
             return        
         
         
